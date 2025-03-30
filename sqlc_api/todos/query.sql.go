@@ -11,28 +11,21 @@ import (
 )
 
 const createTodo = `-- name: CreateTodo :exec
-INSERT INTO todos (task, created_by, created_date, updated_date) VALUES ($1, $2, $3, $4) RETURNING id, task, created_by, created_date, updated_date
+INSERT INTO todos (task, created_by) VALUES ($1, $2) RETURNING id, task, created_by, created_date, updated_date, done
 `
 
 type CreateTodoParams struct {
-	Task        sql.NullString
-	CreatedBy   sql.NullInt64
-	CreatedDate sql.NullTime
-	UpdatedDate sql.NullTime
+	Task      sql.NullString
+	CreatedBy sql.NullInt64
 }
 
 func (q *Queries) CreateTodo(ctx context.Context, arg CreateTodoParams) error {
-	_, err := q.db.ExecContext(ctx, createTodo,
-		arg.Task,
-		arg.CreatedBy,
-		arg.CreatedDate,
-		arg.UpdatedDate,
-	)
+	_, err := q.db.ExecContext(ctx, createTodo, arg.Task, arg.CreatedBy)
 	return err
 }
 
 const deleteTodo = `-- name: DeleteTodo :exec
-DELETE FROM todos WHERE id = $1 RETURNING id, task, created_by, created_date, updated_date
+DELETE FROM todos WHERE id = $1 RETURNING id, task, created_by, created_date, updated_date, done
 `
 
 func (q *Queries) DeleteTodo(ctx context.Context, id int32) error {
@@ -40,25 +33,81 @@ func (q *Queries) DeleteTodo(ctx context.Context, id int32) error {
 	return err
 }
 
-const getTodo = `-- name: GetTodo :one
-SELECT id, task, created_by, created_date, updated_date FROM todos WHERE id = $1 LIMIT 1
+const getAllUsers = `-- name: GetAllUsers :many
+SELECT id, username, email_id, phone_no, created_date, password FROM users order by created_date desc
 `
 
-func (q *Queries) GetTodo(ctx context.Context, id int32) (Todo, error) {
+func (q *Queries) GetAllUsers(ctx context.Context) ([]User, error) {
+	rows, err := q.db.QueryContext(ctx, getAllUsers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []User
+	for rows.Next() {
+		var i User
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.EmailID,
+			&i.PhoneNo,
+			&i.CreatedDate,
+			&i.Password,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getTodo = `-- name: GetTodo :one
+SELECT todos.id, task, created_by, todos.created_date, updated_date, done, users.id, username, email_id, phone_no, users.created_date, password FROM todos left join users on users.id = todos.user_id WHERE todos.id = $1 LIMIT 1
+`
+
+type GetTodoRow struct {
+	ID            int32
+	Task          sql.NullString
+	CreatedBy     sql.NullInt64
+	CreatedDate   sql.NullTime
+	UpdatedDate   sql.NullTime
+	Done          sql.NullBool
+	ID_2          sql.NullInt32
+	Username      sql.NullString
+	EmailID       sql.NullString
+	PhoneNo       sql.NullString
+	CreatedDate_2 sql.NullTime
+	Password      sql.NullString
+}
+
+func (q *Queries) GetTodo(ctx context.Context, id int32) (GetTodoRow, error) {
 	row := q.db.QueryRowContext(ctx, getTodo, id)
-	var i Todo
+	var i GetTodoRow
 	err := row.Scan(
 		&i.ID,
 		&i.Task,
 		&i.CreatedBy,
 		&i.CreatedDate,
 		&i.UpdatedDate,
+		&i.Done,
+		&i.ID_2,
+		&i.Username,
+		&i.EmailID,
+		&i.PhoneNo,
+		&i.CreatedDate_2,
+		&i.Password,
 	)
 	return i, err
 }
 
 const getTodos = `-- name: GetTodos :many
-SELECT id, task, created_by, created_date, updated_date FROM todos order by created_date desc
+SELECT id, task, created_by, created_date, updated_date, done FROM todos order by created_date desc
 `
 
 func (q *Queries) GetTodos(ctx context.Context) ([]Todo, error) {
@@ -76,6 +125,7 @@ func (q *Queries) GetTodos(ctx context.Context) ([]Todo, error) {
 			&i.CreatedBy,
 			&i.CreatedDate,
 			&i.UpdatedDate,
+			&i.Done,
 		); err != nil {
 			return nil, err
 		}
@@ -90,8 +140,70 @@ func (q *Queries) GetTodos(ctx context.Context) ([]Todo, error) {
 	return items, nil
 }
 
+const getUser = `-- name: GetUser :one
+SELECT id, username, email_id, phone_no, created_date, password FROM users WHERE id = $1 LIMIT 1
+`
+
+func (q *Queries) GetUser(ctx context.Context, id int32) (User, error) {
+	row := q.db.QueryRowContext(ctx, getUser, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.EmailID,
+		&i.PhoneNo,
+		&i.CreatedDate,
+		&i.Password,
+	)
+	return i, err
+}
+
+const login = `-- name: Login :one
+SELECT id, username, email_id, phone_no, created_date, password FROM users WHERE username = $1 AND password = $2 LIMIT 1
+`
+
+type LoginParams struct {
+	Username string
+	Password string
+}
+
+func (q *Queries) Login(ctx context.Context, arg LoginParams) (User, error) {
+	row := q.db.QueryRowContext(ctx, login, arg.Username, arg.Password)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.EmailID,
+		&i.PhoneNo,
+		&i.CreatedDate,
+		&i.Password,
+	)
+	return i, err
+}
+
+const register = `-- name: Register :exec
+INSERT INTO users (username, email_id, phone_no,password) VALUES ($1, $2, $3, $4) RETURNING id, username, email_id, phone_no, created_date, password
+`
+
+type RegisterParams struct {
+	Username string
+	EmailID  string
+	PhoneNo  sql.NullString
+	Password string
+}
+
+func (q *Queries) Register(ctx context.Context, arg RegisterParams) error {
+	_, err := q.db.ExecContext(ctx, register,
+		arg.Username,
+		arg.EmailID,
+		arg.PhoneNo,
+		arg.Password,
+	)
+	return err
+}
+
 const updateTodo = `-- name: UpdateTodo :exec
-UPDATE todos SET task = $1, updated_date = $2 WHERE id = $3 RETURNING id, task, created_by, created_date, updated_date
+UPDATE todos SET task = $1, updated_date = $2 WHERE id = $3 RETURNING id, task, created_by, created_date, updated_date, done
 `
 
 type UpdateTodoParams struct {
@@ -102,5 +214,19 @@ type UpdateTodoParams struct {
 
 func (q *Queries) UpdateTodo(ctx context.Context, arg UpdateTodoParams) error {
 	_, err := q.db.ExecContext(ctx, updateTodo, arg.Task, arg.UpdatedDate, arg.ID)
+	return err
+}
+
+const updateTodoStatus = `-- name: UpdateTodoStatus :exec
+UPDATE todos SET done = $1 WHERE id = $2 RETURNING id, task, created_by, created_date, updated_date, done
+`
+
+type UpdateTodoStatusParams struct {
+	Done sql.NullBool
+	ID   int32
+}
+
+func (q *Queries) UpdateTodoStatus(ctx context.Context, arg UpdateTodoStatusParams) error {
+	_, err := q.db.ExecContext(ctx, updateTodoStatus, arg.Done, arg.ID)
 	return err
 }

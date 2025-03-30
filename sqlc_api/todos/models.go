@@ -6,6 +6,7 @@ package todos
 
 import (
 	"database/sql"
+	"time"
 )
 
 type Todo struct {
@@ -14,4 +15,14 @@ type Todo struct {
 	CreatedBy   sql.NullInt64
 	CreatedDate sql.NullTime
 	UpdatedDate sql.NullTime
+	Done        sql.NullBool
+}
+
+type User struct {
+	ID          int32
+	Username    string
+	EmailID     string
+	PhoneNo     sql.NullString
+	CreatedDate time.Time
+	Password    string
 }
